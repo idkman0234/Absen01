@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Back Office Admin</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; background-color: #f4f4f9; }
+        .header { background: #343a40; color: white; padding: 15px; text-align: center; }
+        .container { max-width: 700px; margin: 20px auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h3 { border-bottom: 2px solid #007bff; padding-bottom: 5px; margin-top: 25px; }
+        
+        #camera-container { position: relative; width: 100%; max-width: 320px; display: none; margin: 10px auto; }
+        video { width: 100%; border-radius: 8px; transform: scaleX(-1); border: 3px solid #ccc; }
+        
+        input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 10px 15px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%;}
+        .btn-buka-cam { background: #17a2b8; margin-bottom: 10px;}
+        
+        #list-karyawan { list-style: none; padding: 0; text-align: left; }
+        .item-karyawan { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .btn-hapus { background: #dc3545; width: auto; padding: 5px 10px; font-size: 12px; margin: 0; }
+        
+        /* Area Filter & Bungkus Tabel Biar Bisa Digeser Kanan-Kiri di HP */
+        .filter-area { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+        input[type="month"] { width: auto; flex-grow: 1; padding: 10px; border-radius: 5px; border: 1px solid #ccc; }
+        .btn-refresh { background: #6c757d; width: auto; flex-grow: 1; }
+        .btn-excel { background: #28a745; width: 100%; margin-top: 15px; font-size: 15px; padding: 12px; }
+        
+        .table-container { width: 100%; overflow-x: auto; margin-top: 15px; border: 1px solid #ddd; border-radius: 6px; }
+        
+        /* Gaya Tabel Matriks Profesional */
+        table { width: 100%; border-collapse: collapse; font-size: 11px; min-width: 900px; }
+        th, td { border: 1px solid #ccc; padding: 6px 4px; text-align: center; }
+        th { background-color: #007bff; color: white; font-weight: bold; }
+        .header-utama { background-color: #0056b3; font-size: 12px; }
+        
+        .nama-karyawan-cell { text-align: left; font-weight: bold; background-color: #f9f9f9; padding-left: 8px; font-size: 12px; }
+        .tipe-absen-cell { font-weight: bold; font-size: 10px; text-transform: uppercase; }
+        .masuk-row { color: #28a745; background-color: #fdfdfd; }
+        .keluar-row { color: #dc3545; background-color: #fafafa; }
+        
+        .jam { font-weight: bold; color: #212529; background-color: #e2f0d9; border-radius: 3px; }
+        .belum { color: #bbb; font-style: italic; background-color: #ffffff; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>Dashboard Admin / HRD</h2>
+    </div>
+
+    <div class="container">
+        <h3>📸 Tambah Karyawan Baru</h3>
+        <input type="text" id="nama-karyawan" placeholder="Ketik Nama Lengkap Karyawan...">
+        <button class="btn-buka-cam" onclick="nyalakanKamera()">1. Buka Kamera</button>
+        <div id="camera-container"><video id="video" autoplay muted playsinline></video></div>
+        <button id="btn-simpan" style="display:none;" onclick="simpanWajah()">2. Ambil Foto & Simpan</button>
+        <p id="pesan-admin" style="text-align:center; color:red; font-size: 14px;"></p>
+
+        <h3>👥 Karyawan Terdaftar</h3>
+        <ul id="list-karyawan"><li>Memuat daftar karyawan...</li></ul>
+
+        <h3>📊 Rekap Absensi Bulanan (Format Excel Horizontal)</h3>
+        <div class="filter-area">
+            <input type="month" id="input-bulan" onchange="muatLaporanBulanan()">
+            <button class="btn-refresh" onclick="muatLaporanBulanan()">🔄 Refresh Tampilan</button>
+        </div>
+        
+        <div class="table-container">
+            <table id="tabel-rekap-absen">
+                <thead id="tabel-head">
+                    </thead>
+                <tbody id="tabel-laporan">
+                    <tr><td colspan="5">Pilih bulan dan tunggu data dimuat...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <button class="btn-excel" onclick="exportKeExcel()">📥 Download Laporan Excel Matrix (.xlsx)</button>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyAvecIxfnR-7VJgJJL7LDCvTUZuTpYLRz8",
+            authDomain: "absen-cabang-d6f37.firebaseapp.com",
+            projectId: "absen-cabang-d6f37",
+            storageBucket: "absen-cabang-d6f37.firebasestorage.app",
+            messagingSenderId: "464663936990",
+            appId: "1:464663936990:web:12af760625813c83d0274f"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+        let video = document.getElementById('video');
+        let pesan = document.getElementById('pesan-admin');
+
+        async function nyalakanKamera() {
+            pesan.innerText = "Memuat AI...";
+            await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            video.srcObject = stream;
+            document.getElementById('camera-container').style.display = 'block';
+            document.getElementById('btn-simpan').style.display = 'block';
+            pesan.innerText = "Kamera siap.";
+        }
+
+        async function simpanWajah() {
+            const nama = document.getElementById('nama-karyawan').value.trim();
+            if (!nama) return alert("Isi nama dulu!");
+            pesan.innerText = "Memindai...";
+            const deteksi = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+            if (deteksi) {
+                const docId = nama.toLowerCase().replace(/\s+/g, '_');
+                await db.collection("data_wajah").doc(docId).set({
+                    nama: nama, descriptor: Array.from(deteksi.descriptor), tanggal_daftar: new Date()
+                });
+                pesan.innerText = `Sukses simpan wajah ${nama}!`;
+                document.getElementById('nama-karyawan').value = "";
+                muatDaftarKaryawan();
+            } else {
+                pesan.innerText = "Wajah tidak jelas, coba lagi.";
+            }
+        }
+
+        async function muatDaftarKaryawan() {
+            const listUl = document.getElementById('list-karyawan');
+            const snapshot = await db.collection("data_wajah").get();
+            listUl.innerHTML = snapshot.empty ? '<li>Belum ada data.</li>' : '';
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                listUl.innerHTML += `<li class="item-karyawan"><span>${data.nama}</span> <button class="btn-hapus" onclick="hapusKaryawan('${doc.id}', '${data.nama}')">Hapus</button></li>`;
+            });
+        }
+
+        async function hapusKaryawan(docId, nama) {
+            if (confirm(`Hapus wajah ${nama}?`)) {
+                await db.collection("data_wajah").doc(docId).delete();
+                muatDaftarKaryawan();
+                muatLaporanBulanan();
+            }
+        }
+
+        // ===================================================
+        // LOGIKA BARU: MEMPROSES FORMAT TABEL MATRIKS SILANG
+        // ===================================================
+        async function muatLaporanBulanan() {
+            const thead = document.getElementById('tabel-head');
+            const tbody = document.getElementById('tabel-laporan');
+            
+            const bulanDipilih = document.getElementById('input-bulan').value; // Contoh: "2026-05"
+            if(!bulanDipilih) return;
+
+            const [tahun, bulan] = bulanDipilih.split('-');
+            const jumlahHari = new Date(tahun, bulan, 0).getDate(); // Hitung jumlah hari otomatis (28, 29, 30, atau 31)
+
+            // 1. Gambar Struktur Header Atas (Tanggal)
+            let headerHTML = `
+                <tr class="header-utama">
+                    <th rowspan="2" style="width: 140px; min-width: 140px;">Nama Karyawan</th>
+                    <th rowspan="2" style="width: 60px; min-width: 60px;">Absen</th>
+                    <th colspan="${jumlahHari}">Tanggal Periode: ${bulan}/${tahun}</th>
+                </tr>
+                <tr>
+            `;
+            for(let d = 1; d <= jumlahHari; d++) {
+                headerHTML += `<th style="width: 30px; min-width: 30px;">${String(d).padStart(2, '0')}</th>`;
+            }
+            headerHTML += `</tr>`;
+            thead.innerHTML = headerHTML;
+
+            tbody.innerHTML = '<tr><td colspan="' + (jumlahHari + 2) + '">Menyusun matriks data dari database...</td></tr>';
+
+            try {
+                // 2. Ambil semua list karyawan resmi di server
+                const snapKaryawan = await db.collection("data_wajah").get();
+                const listNamaKaryawan = [];
+                snapKaryawan.forEach(d => listNamaKaryawan.push(d.data().nama));
+                listNamaKaryawan.sort(); // Urutkan nama sesuai abjad A-Z
+
+                // 3. Siapkan kerangka kosong untuk matriks bulan ini
+                const matriksRekap = {};
+                listNamaKaryawan.forEach(nama => {
+                    matriksRekap[nama] = {};
+                    for(let d = 1; d <= jumlahHari; d++) {
+                        matriksRekap[nama][d] = { masuk: "-", keluar: "-" };
+                    }
+                });
+
+                // 4. Tarik data log absen dari server dan masukkan ke dalam kamar matriks masing-masing
+                const snapLog = await db.collection("log_absen").get();
+                snapLog.forEach(doc => {
+                    const log = doc.data();
+                    if(!log.waktu || !log.nama) return;
+
+                    const dateObj = log.waktu.toDate();
+                    const y = dateObj.getFullYear();
+                    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    
+                    // Pastikan log cocok dengan tahun dan bulan yang di-filter
+                    if (`${y}-${m}` === bulanDipilih) {
+                        const hari = dateObj.getDate();
+                        const nama = log.nama;
+                        const jamMenit = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+                        // Pengaman jika ada log nama yang belum terdaftar di tabel data_wajah
+                        if (!matriksRekap[nama]) {
+                            matriksRekap[nama] = {};
+                            for(let day = 1; day <= jumlahHari; day++) {
+                                matriksRekap[nama][day] = { masuk: "-", keluar: "-" };
+                            }
+                            listNamaKaryawan.push(nama);
+                        }
+
+                        if(log.status === "Masuk" || log.status === "Hadir") {
+                            if (matriksRekap[nama][hari].masuk === "-" || jamMenit < matriksRekap[nama][hari].masuk) {
+                                matriksRekap[nama][hari].masuk = jamMenit;
+                            }
+                        } else if(log.status === "Keluar") {
+                            if (matriksRekap[nama][hari].keluar === "-" || jamMenit > matriksRekap[nama][hari].keluar) {
+                                matriksRekap[nama][hari].keluar = jamMenit;
+                            }
+                        }
+                    }
+                });
+
+                // 5. Cetak isi matriks ke layar HTML
+                if(listNamaKaryawan.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="' + (jumlahHari + 2) + '">Belum ada karyawan terdaftar.</td></tr>';
+                    return;
+                }
+
+                let bodyHTML = "";
+                listNamaKaryawan.forEach(nama => {
+                    // BARIS 1: MASUK
+                    bodyHTML += `<tr class="masuk-row">`;
+                    bodyHTML += `<td rowspan="2" class="nama-karyawan-cell">${nama}</td>`; // Satukan kolom nama biar rapi pakai rowspan=2
+                    bodyHTML += `<td class="tipe-absen-cell">Masuk</td>`;
+                    for(let d = 1; d <= jumlahHari; d++) {
+                        const jam = matriksRekap[nama][d].masuk;
+                        bodyHTML += `<td class="${jam !== '-' ? 'jam' : 'belum'}">${jam}</td>`;
+                    }
+                    bodyHTML += `</tr>`;
+
+                    // BARIS 2: KELUAR
+                    bodyHTML += `<tr class="keluar-row">`;
+                    bodyHTML += `<td class="tipe-absen-cell">Keluar</td>`;
+                    for(let d = 1; d <= jumlahHari; d++) {
+                        const jam = matriksRekap[nama][d].keluar;
+                        bodyHTML += `<td class="${jam !== '-' ? 'jam' : 'belum'}">${jam}</td>`;
+                    }
+                    bodyHTML += `</tr>`;
+                });
+
+                tbody.innerHTML = bodyHTML;
+
+            } catch (err) {
+                console.error(err);
+                tbody.innerHTML = '<tr><td colspan="' + (jumlahHari + 2) + '" style="color:red;">Gagal memproses rekap data.</td></tr>';
+            }
+        }
+
+        function exportKeExcel() {
+            const bulanDipilih = document.getElementById('input-bulan').value;
+            if(!bulanDipilih) return alert("Pilih bulan rekap dulu bro!");
+            
+            const tbody = document.getElementById('tabel-laporan');
+            if (tbody.rows.length <= 1 && tbody.rows[0].cells[0].textContent.includes("tunggu")) {
+                return alert("Nggak ada data absensi untuk di-export!");
+            }
+
+            const elemenTabel = document.getElementById('tabel-rekap-absen');
+            const lembarKerja = XLSX.utils.table_to_sheet(elemenTabel);
+            const fileExcel = XLSX.utils.book_new();
+            
+            XLSX.utils.book_append_sheet(fileExcel, lembarKerja, "Roster Bulanan");
+            XLSX.writeFile(fileExcel, `Laporan_Matrix_Absen_${bulanDipilih}.xlsx`);
+        }
+
+        window.onload = function() {
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('input-bulan').value = `${yyyy}-${mm}`;
+            
+            muatDaftarKaryawan();
+            muatLaporanBulanan();
+        };
+    </script>
+</body>
+</html>
